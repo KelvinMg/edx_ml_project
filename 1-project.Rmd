@@ -1,0 +1,477 @@
+
+
+---
+title: "Predicting Student Attendance Based on Stress, Mood, and Other Features"
+author: "Kelvin"
+output: pdf_document
+   
+---
+
+
+# Executive Summary
+
+The goal of this analysis is to forecast student attendance ("Present" vs. "Absent") based on several behavioral and psychological characteristics, such as mood score, anxiety level, stress level, and sleep duration. With an equal number of "Present" and "Absent" observations, the data is balanced. This project aims to investigate the relationships between these variables and attendance, as well as to develop predictive models using machine learning techniques. To predict attendance status, key techniques included data cleansing, exploratory data analysis, and fitting logistic regression and k-nearest neighbors models.
+
+
+# Data Description and Variables
+
+The "Student Monitoring" dataset is available on Kaggle and can be downloaded from this link.
+
+The dataset contains 15,000 records and has 6 fields/attributes, with "Attendance.Status" as the target variable. It includes several variables related to student behavior, such as:
+
++ Student.ID: A unique identifier for each student.
++ Attendance.Status: Indicates whether a student was "Present" or "Absent" for a particular class.
++ Stress.Level..GSR.: The student's stress level based on Galvanic Skin Response (GSR).
++ Sleep.Hours: The number of hours of sleep the student had.
++ Anxiety.Level: The self-reported anxiety level of the student.
++ Mood.Score: The self-reported mood score of the student.
+The goal of this analysis is to predict whether a student will attend class based on these features, using machine learning models.
+
+
+\newpage
+# Methods and Analysis
+
+### Data Cleaning and Transformation
+
+```{r loading-data, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+#Download the CSV file to a temporary file
+url <- "https://github.com/KelvinMg/edx_ml_project/raw/refs/heads/main/student_monnitoring_data.csv"  
+temp_file <- tempfile(fileext = ".csv")
+download.file(url, temp_file, mode = "w")
+
+#Read the contents of the CSV into an R object
+data <- read.csv(temp_file) 
+
+#Delete the temporary file
+file.remove(temp_file)
+
+#Verify the data
+head(data)
+#View(data)
+str(data)
+sum(is.na(data))
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(caret)) install.packages("caret")
+if(!require(dslabs)) install.packages("dslabs")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(broom)) install.packages("broom")
+if(!require(purrr)) install.packages("purrr")
+if(!require(knitr)) install.packages("knitr")
+
+library(tidyverse)
+library(dslabs)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(broom)
+library(purrr)
+library(knitr)
+
+```
+
+First, we ensure that the `Attendance.Status` and `Risk.Level` are properly converted to factors. The data is summarized by student ID, where we compute the mean values for stress, anxiety, sleep hours, and mood scores. After this transformation, we exclude any students who were marked as "Late," as we focus on "Present" vs. "Absent" classification.
+
+```{r data-cleaning, , echo=FALSE, warning=FALSE, message=FALSE}
+# Data Transformation and Cleaning
+
+data <- data %>% mutate(Attendance.Status = factor(Attendance.Status),
+                        Risk.Level = factor(Risk.Level))
+# Summarizing data
+result <- data %>%
+  group_by(Student.ID, Attendance.Status) %>%
+  summarise(
+    Mean_Stress_Level = mean(Stress.Level..GSR., na.rm = TRUE),
+    Mean_Sleep_Hours = mean(Sleep.Hours, na.rm = TRUE),
+    Mean_Anxiety_Level = mean(Anxiety.Level, na.rm = TRUE),
+    Mean_Mood_Score = mean(Mood.Score, na.rm = TRUE)
+  )
+
+data_summary <- as.data.frame(result) 
+
+data_summary <- data_summary %>% filter(Attendance.Status != "Late") %>%
+  mutate(Attendance.Status = factor(Attendance.Status))
+
+str(data_summary)
+```
+
+---
+
+# Exploratory Data Analysis
+We visualized each feature to explore its distribution and relationship with attendance status. Here are the key findings:
+
+**stress level is normally distributed as can be seen from the shape of a bell curve below**
+``` {r stress-histogram, echo = FALSE}
+data_summary %>% ggplot(aes(Mean_Stress_Level)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.5, color = "black", fill = "skyblue") +
+  geom_density(color = "red", linewidth = 1) +
+  theme_minimal() +
+  labs(title = "Histogram with Density Curve", x = "Value", y = "Density")
+
+```
+
+
+
+```{r stresslevel-boxplot, echo=FALSE}
+ggplot(data_summary, aes(x = Attendance.Status, y = Mean_Stress_Level)) +
+  geom_boxplot() 
+```  
+
+
+**Stress Level: Students who are present tend to have slightly higher stress levels than those who are absent.**
+When students are present, they experience slightly higher stress than when they are absent, which could indicate accumulated stress from additional responsibilities at school. In contrast, when students are absent, they may not be participating in these stressful situations, and as a result, their stress levels may not reflect the same intensity.
+
+
+
+**Sleep hours are normally distributed, as can be seen from the bell curve shape below.**
+```{r sleephours-histogram, echo=FALSE}
+data_summary %>% ggplot(aes(Mean_Sleep_Hours)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.5, color = "black", fill = "skyblue") +
+  geom_density(color = "red", linewidth = 1) +
+  theme_minimal() +
+  labs(title = "Histogram with Density Curve", x = "Value", y = "Density")
+```
+
+
+```{r sleephours-boxplot, echo=FALSE}
+ggplot(data_summary, aes(x = Attendance.Status, y = Mean_Sleep_Hours)) +
+  geom_boxplot() 
+```
+
+**Sleep Hours: Present students tend to have slightly better sleep compared to those who are absent.**
+
+\newpage
+**Anxiety level is normally distributed as can be seen from the shape of a bell curve shape below**
+```{r anxietylevel-histogram, echo=FALSE}
+data_summary %>% ggplot(aes(Mean_Anxiety_Level)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.5, color = "black", fill = "skyblue") +
+  geom_density(color = "red", linewidth = 1) +
+  theme_minimal() +
+  labs(title = "Histogram with Density Curve", x = "Value", y = "Density")
+```
+
+
+
+```{r anxietylevel-boxplot, echo=FALSE}
+data_summary %>% ggplot(aes(x  = Attendance.Status,y = Mean_Anxiety_Level)) +
+  geom_boxplot()
+```
+
+**Anxiety Level: Students who are absent report higher anxiety levels.**
+When students are present, they have lower anxiety levels than when they are absent, suggesting that absence might allow students to avoid situations that trigger their anxiety. Their absence could reflect anxiety about school, with being absent providing temporary relief. On the other hand, when students are present, they may be actively confronting and managing their anxiety through exposure, social interaction, and academic engagement, all of which can help reduce anxiety.
+
+
+**Mood score is normally distributed as can be seen from the shape of a bell curve shape below**
+```{r moodscore-histogram, echo=FALSE}
+data_summary %>% ggplot(aes(Mean_Mood_Score)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.5, color = "black", fill = "skyblue") +
+  geom_density(color = "red", linewidth = 1) +
+  theme_minimal() +
+  labs(title = "Histogram with Density Curve", x = "Value", y = "Density")
+```
+
+
+
+```{r moodscore-boxplot, echo=FALSE}
+data_summary %>% ggplot(aes(x = Attendance.Status,y = Mean_Mood_Score)) +
+  geom_boxplot()
+```
+
+**Mood Score: Present students have higher mood scores compared to absent students.**
+The higher mood in students when they are present, compared to when they are absent, suggests that school attendance is associated with a more positive emotional state. This is likely due to social engagement, routine, academic participation, and the opportunity for positive emotional experiences at school. In contrast, when students are absent, they may experience a lower mood due to isolation, avoidance, or struggles with emotional or psychological challenges, which could prevent them from benefiting from the mood-regulating advantages of school life.
+
+
+ 
+
+###Correlation between the features
+```{r correlation-featuresonly, echo=FALSE}
+cor_matrix <- cor(data_summary %>% select(Mean_Stress_Level, Mean_Sleep_Hours, Mean_Anxiety_Level, Mean_Mood_Score))
+cor_matrix
+
+```
+
+
+The correlations between these features are generally weak, indicating that stress levels, sleep hours, anxiety levels, and mood scores do not show strong relationships with one another. These variables may be influenced by other factors not captured in this dataset, or there may be complexities (e.g., non-linear relationships) that aren't captured by simple correlation analysis.
+
+Mood shows a slight positive correlation with stress (correlation of 0.0412). Anxiety and sleep hours exhibit very weak negative relationships with mood and anxiety, respectively, but these trends are not strong enough to be considered highly significant
+
+###correlation of features with attendance status
+```{r}
+cor(data_summary %>% mutate(Attendance.Status = ifelse(Attendance.Status == "Absent", 0, 1)) %>%
+                            select(-Student.ID))
+```
+
+
+There is a slight tendency for attendance to be positively correlated with mood and stress, but these correlations are minimal.
+
+
+
+Machine learning 
+
+Guessing model 
+
+We will build a guessing model to compare it against the other two models we will create, namely the logistic regression model and k-Nearest Neighbors with cross-validation. First, we will create a training and test set using the createDataPartition function. Then, we will simulate random guessing and evaluate its performance.
+
+```{r random-guessing-model, echo=FALSE}
+#machine learning
+y <- data_summary$Attendance.Status
+
+#generate training and test sets
+set.seed(42)
+test_index <- createDataPartition(y, times = 1, p = 0.3, list = FALSE)
+test_set <- data_summary[test_index, ]
+train_set <- data_summary[-test_index, ]
+
+y <- test_set$Attendance.Status
+
+
+#to compare with later models we will check the accuracy if you randomly guess
+y_hat <- sample(c("Present", "Absent"), length(test_index), replace = TRUE) %>% 
+  factor(levels = levels(data_summary$Attendance.Status))
+
+guessing_accuracy <- mean(y_hat == y)
+guessing_accuracy 
+guessing_conf_matrix <- confusionMatrix(y_hat, y)
+guessing_conf_matrix
+
+#guessing RMSE
+y_hat_guessing_rmse <- as.integer( ifelse(y_hat == "Present", 1, 0))
+y_rmse <- as.integer(ifelse(y == "Present", 1,0))
+RMSE_guessing_model <- sqrt(mean((y_hat_guessing_rmse - y_rmse)^2))
+cat("RMSE ",RMSE_guessing_model)
+
+```
+
+
+rmse is far from zero meaning the predicted values are not close to the true values
+which is expected since we are guessing 
+
+
+
+The next step is understanding which feature can generate the highest accuracy in predicting attendance status 
+```{r features-accuracy-prediction, echo=FALSE, warning=FALSE}
+str(train_set)
+y <- test_set$Attendance.Status
+accuracy <- function(x){
+  rangedValues <- seq(range(x)[1], range(x)[2], by=0.1)
+  sapply(rangedValues, function(i){
+    y_hat <- ifelse(x>i, 'Present', 'Absent')
+    mean(y_hat==y)
+  })
+}
+
+predictions <- apply(train_set[,-c(1,2)], 2, accuracy)
+
+
+
+sapply(predictions, max)
+```
+There is no feature that predicts better than random guessing, as their accuracy falls within the confidence interval of the guessing model, which ranges from 0.46 to 0.57. The best feature among all the features is the mood score.
+
+
+
+First model will be logistic regression
+
+The features have extremely weak correlations with the attendance status but the model might still find some patterns in the data.
+
+first step will be without using the training function in the  caret package
+```{r logistic-regression-model, echo=FALSE, message=FALSE}
+log_model <- glm(Attendance.Status ~ Mean_Mood_Score + Mean_Anxiety_Level + Mean_Stress_Level + Mean_Sleep_Hours, 
+                 family = binomial, 
+                 data = train_set)
+
+summary(log_model)
+#the summary shows only moodscore is statistically significant since it's p value is <0.05
+
+p_hat_glm <- predict(log_model, newdata = test_set, type = "response")
+y_hat_glm <- factor(ifelse(p_hat_glm > 0.5, 1, 0), levels = c(0, 1), labels = c("Absent", "Present"))
+
+log_model_conf_matrix <- confusionMatrix(y_hat_glm, y)
+
+log_model_conf_matrix
+guessing_conf_matrix
+
+#rmse
+y_hat_logmodel_rmse <- as.integer(ifelse(y_hat_glm == "Present", 1, 0))
+RMSE_logmodel <- sqrt(mean((y_hat_logmodel_rmse - y_rmse)^2))
+cat("using all predictors",RMSE_logmodel)
+
+```
+The summary of the model shows that only mood score is statistically significant, as its p-value is less than 0.05. Therefore, we will use mood score separately after attempting to predict using all the other predictors in the models to test if the model improves.
+
+
+
+Here are the confusion matrix results of the various variations of the model
+```{r logistic-regression-models, echo=FALSE, message=FALSE}
+log_model_mood <- glm(Attendance.Status ~ Mean_Mood_Score, 
+                 family = binomial, 
+                 data = train_set)
+
+p_hat_glm_mood <- predict(log_model_mood, newdata = test_set, type = "response")
+y_hat_glm_mood <- factor(ifelse(p_hat_glm_mood > 0.55, 1, 0), levels = c(0, 1), labels = c("Absent", "Present"))
+log_model_mood_conf_matrix <- confusionMatrix(y_hat_glm_mood, y)
+log_model_mood_conf_matrix
+
+#rmse
+y_hat_logmodelmood_rmse <- as.integer(ifelse(y_hat_glm_mood == "Present", 1, 0))
+RMSE_logmodelmood <- sqrt(mean((y_hat_logmodelmood_rmse - y_rmse)^2))
+#The only advantage the model has over guessing is sensitivity
+
+#carret package train
+train_glm <- train(Attendance.Status ~ Mean_Mood_Score + Mean_Anxiety_Level + Mean_Stress_Level + Mean_Sleep_Hours, method = "glm", data = train_set)
+y_hat_train_glm <- predict(train_glm, test_set, type = "raw")
+log_model_train_conf_matrix <- confusionMatrix(y_hat_train_glm,y)
+#rmse
+y_hat_train_glm_rmse <- as.integer(ifelse(y_hat_train_glm=="Present", 1, 0))
+RMSE_logmodeltraining <- sqrt(mean((y_hat_train_glm_rmse - y_rmse)^2))
+#has no advantage on guessing
+#using only mood
+train_glm <- train(Attendance.Status ~ Mean_Mood_Score, method = "glm", data = train_set)
+y_hat_trainmood_glm <- predict(train_glm, test_set, type = "raw")
+log_model_mood_train_conf_matrix <- confusionMatrix(y_hat_trainmood_glm,y)
+#rmse
+y_hat_trainmood_glm_rmse <- as.integer(ifelse(y_hat_trainmood_glm=="Present", 1, 0))
+RMSE_logmodelmoodtraining <- sqrt(mean((y_hat_trainmood_glm_rmse - y_rmse)^2))
+
+
+
+log_model_conf_matrix
+cat("RMSE logmodel",RMSE_logmodel)
+log_model_mood_conf_matrix
+cat("RMSE logmodelmood", RMSE_logmodelmood)
+log_model_train_conf_matrix
+cat("RMSE_logmodeltraining", RMSE_logmodeltraining)
+log_model_mood_train_conf_matrix
+cat("RMSE_logmodelmoodtraining", RMSE_logmodelmoodtraining)
+```
+
+
+The logistic regression model variations tested above do not outperform guessing. All models
+had lower accuracy compared to random guessing. The model that used only "Mean_Mood_Score" 
+(without using the train function) showed a slight advantage in sensitivity. However, 
+ its accuracy was still below 50%, which means that logistic regression model performed poorly.
+
+
+
+second model will be  k-Nearest Neighbors with cross validation
+
+we start by choosing the best k and testing the various 
+variations of KNN to get the one with the best accuracy
+
+These were the results of the various model variations of the knn model
+```{r knn-model_variations, echo=FALSE, message=FALSE, warning=FALSE}
+best_k <- 291
+best_kmood <- 17
+
+#evaluating model
+#training
+knn_fit <- knn3(Attendance.Status ~ Mean_Mood_Score + Mean_Anxiety_Level + Mean_Stress_Level + Mean_Sleep_Hours,
+            data = train_set, k = best_k)
+
+
+y_hat_knn <- predict(knn_fit, test_set, type = "class")
+
+knn_conf_matrix <- confusionMatrix(y_hat_knn, y)
+
+#rmse
+y_hat_knn_rmse <- as.integer(ifelse(y_hat_knn == "Present", 1, 0))
+RMSE_knn <- sqrt(mean((y_hat_knn_rmse - y_rmse)^2))
+
+
+#the model is better than guessing in both sensitivity and accuracy but not a huge difference
+#using only mood score
+#training
+
+knn_fitmood <- knn3(Attendance.Status ~ Mean_Mood_Score,
+                data = train_set, k = best_kmood)
+
+
+y_hat_knnmood <- predict(knn_fitmood, test_set, type = "class")
+
+knnmood_conf_matrix <- confusionMatrix(y_hat_knnmood, y)
+
+#rmse
+y_hat_knnmood_rmse <- as.integer(ifelse(y_hat_knnmood == "Present", 1, 0))
+RMSE_knnmood <- sqrt(mean((y_hat_knn_rmse - y_rmse)^2))
+
+#caret train
+#train
+control <- trainControl(method = "cv", number = 10, p = .9)
+tune_grid <- expand.grid(k = best_k)
+train_knn <- train(Attendance.Status ~ Mean_Mood_Score + Mean_Anxiety_Level + Mean_Stress_Level + Mean_Sleep_Hours,
+                   method = "knn", data = train_set, tuneGrid = tune_grid, trControl = control)
+
+
+y_hat_knntrain <- predict(train_knn, test_set, type = "raw")
+
+knntrain_conf_matrix <- confusionMatrix(y_hat_knntrain, y)
+
+#rmse
+y_hat_knntrain_rmse <- as.integer(ifelse(y_hat_knntrain=="Present", 1, 0))
+RMSE_knntrain <- sqrt(mean((y_hat_knntrain_rmse - y_rmse)^2))
+
+#using only mood score
+control1 <- trainControl(method = "cv", number = 10, p = .9)
+tune_grid1 <- expand.grid(k = best_kmood)
+train_knnmood <- train(Attendance.Status ~ Mean_Mood_Score,
+                       method = "knn", data = train_set, tuneGrid = tune_grid1,
+                       trControl = control1) 
+
+y_hat_knnmoodtrain <- predict(train_knnmood, test_set, type = "raw")
+knnmoodtrain_conf_matrix <- confusionMatrix(y_hat_knnmoodtrain, y)
+
+#rmse
+y_hat_knnmoodtrain_rmse <- as.integer(ifelse(y_hat_knnmoodtrain=="Present", 1, 0))
+RMSE_knnmoodtrain <- sqrt(mean((y_hat_knnmoodtrain_rmse - y_rmse)^2))
+knnmoodtrain_conf_matrix
+cat("RMSE_knn with only the mood score feature using train function",RMSE_knnmoodtrain)
+
+knntrain_conf_matrix
+cat("RMSE_knn with all the features using the train function", RMSE_knntrain)
+
+knnmood_conf_matrix
+cat("RMSE_knn with only the mood score feature without using the train function", RMSE_knnmood)
+
+knn_conf_matrix
+cat("RMSE_knn with all the  features without using the train function", RMSE_knn)
+
+```
+The k-NN model that used only mood score (train_knnmood) is the best of all the models tested, with the highest accuracy and sensitivity for 'Absent.' It performs better than random guessing, but it is still not a particularly strong model.
+
+
+\newpage
+
+**Conclusion**\\\
+This analysis aimed to predict student attendance by examining behavioral and psychological factors, such as stress levels, mood, anxiety, and sleep duration. Despite using various machine learning techniques like logistic regression and k-nearest neighbors (KNN), An accuracy of at least 80% could not be achieved with k-nearest neighbors (KNN) coming closest when using the mood score feature. This shows that there are
+more features that are not recorded that are more influential or the data taken is not as accurate as it should be or more advanced models
+are required i.e. decision trees, random forest and neural networks.
+
+
+Key Insights: \\\
+The exploratory analysis revealed that factors like stress, sleep, anxiety, and mood had weak correlations with attendance, although some notable trends were observed. For instance, students who attended classes had slightly higher stress levels and better mood scores, whereas absent students reported higher anxiety levels.
+
+The machine learning models, including logistic regression and KNN, showed limited predictive power. The best result came from using just the "Mood Score" feature using the KNN model, which performed better than random guessing, but still fell short of ideal accuracy. Which shows mood
+plays a strong role which means additional information such as gender and school year could help more in increasing the robustness of the 
+models.
+
+Implications: \\\
+This analysis provides an initial understanding of the link between student behavior and attendance, this will help in the collection of
+more features, making it possible to assist schools in identifying students at risk of absenteeism and offer targeted interventions.This
+could also help psychologists get to understand what psychological factors affect consistency leading to more advancement in the field. 
+
+Limitations:\\\
+The dataset used may not encompass all the key factors influencing student attendance. For example, missing variables like academic performance, extracurricular activities, or personal issues may limit the model's ability to predict attendance accurately. The models also struggled with low accuracy, which could be attributed to weak feature-relationship correlations.
+
+Future Directions:\\\
+To improve predictive accuracy, future work could focus on:
+
+Adding more features: Including additional behavioral, social, and academic data may enhance model performance.
+Exploring advanced models: Techniques like decision trees, random forests, or deep learning could better capture complex patterns and improve results.
+Expanding the variability of the dataset: more diverse datasets could provide a more comprehensive understanding of the factors influencing attendance.
+
+In conclusion, while the models presented in this analysis offer some insights into the factors affecting student attendance, there is significant room for improvement to make these models more applicable in practical settings.
+
+
+
+references\\\
+This analysis was based on the dataset of ziya https://www.kaggle.com/ziya07.
